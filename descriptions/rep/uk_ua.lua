@@ -1180,12 +1180,12 @@ EID.descriptions[languageCode].VoidNames = {"Швидкість збільшен
 
 EID.descriptions[languageCode].spindownError = "Предмет зникає"
 
-EID.descriptions[languageCode].CraftingBagContent = "Сумка:"
-EID.descriptions[languageCode].CraftingRoomContent = "Кімната:"
-EID.descriptions[languageCode].CraftingFloorContent = "Поверх:"
+EID.descriptions[languageCode].CraftingBagContent = "Сумка: "
+EID.descriptions[languageCode].CraftingRoomContent = "Кімната: "
+EID.descriptions[languageCode].CraftingFloorContent = "Поверх: "
 
-EID.descriptions[languageCode].CraftingBagQuality = "Якість предмета в Сумці:"
-EID.descriptions[languageCode].CraftingBestQuality = "Найкраща Якість:"
+EID.descriptions[languageCode].CraftingBagQuality = "Якість предмета в Сумці: "
+EID.descriptions[languageCode].CraftingBestQuality = "Найкраща Якість: "
 
 EID.descriptions[languageCode].CraftingHideKey = "Сховати:"
 EID.descriptions[languageCode].CraftingPreviewKey = "Показати:"
