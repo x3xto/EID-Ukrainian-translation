@@ -581,6 +581,7 @@ EID.descriptions[languageCode].collectibles={
 ---------- Modifiers ----------
 
 -- Effect of Car battery on Active Items
+-- these all need way more consistency with the original effect text and spellchecking
 EID.descriptions[languageCode].carBattery = {
 	[58] = "Ефект невразливості триває 20 секунд", -- Book of Shadows
 	[66] = "Ефект триває 16 секунд", -- The Hourglass
@@ -917,6 +918,14 @@ EID.descriptions[languageCode].MCM = {
 -- the ItemReminder description will predict the abilities of items with a header like "Item Name Result"
 EID.descriptions[languageCode].ItemReminder = {
 	ResultHeader = " Результат",
+	CategoryNames = {
+		Overview = "Inventory Overview",
+		Special = "Special",
+		Actives = "Held active items",
+		Pockets = "Held pocket items",
+		Trinkets = "Held Trinkets",
+		Passives = "Held passive items"
+	}
 }
 
 -- https://wofsauge.github.io/IsaacDocs/rep/enums/RoomType.html
@@ -954,4 +963,14 @@ EID.descriptions[languageCode].PickupNames = {
 	["5.301"] = "{{Rune}} Руна", -- not a real id
 	["5.350"] = "{{Trinket}} Брелок",
 
+}
+
+EID.descriptions[languageCode].ConditionalDescs = {
+	["5.100.81"] = "Characters that can't have Red Hearts get set to 1 Soul/Black Heart", -- Dead Cat
+	["5.100.241"] = "{{GreedMode}} Doesn't affect Greed Mode", -- Contract From Below
+	["5.100.135 (Keeper)"] = "{{Player14}} Spawns 0-1 coin as Keeper", -- IV Bag Keeper
+	["5.100.135 (PHD)"] = "{{Collectible75}} Spawns 2-3 coins if you have PHD", -- IV Bag PHD
+	["5.100.442"] = "No effect for characters that can't have Red Hearts", -- Dark Prince's Crown
+	["5.300.15"] = "{{DemonBeggar}} Spawns a Devil Beggar", -- Temperance (Greed Mode effect)
+	["5.350.23"] = "{{Warning}} Dying in a {{SacrificeRoom}} Sacrifice Room while holding this trinket unlocks The Lost", -- Missing Poster (Unlock The Lost)
 }
