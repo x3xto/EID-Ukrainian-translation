@@ -395,6 +395,7 @@ function EID:getDescriptionObj(Type, Variant, SubType, entity, checkModifiers)
 	EID:getObjectItemTypeAndCharge(description)
 
 	if checkModifiers ~= false then
+		description = EID:applyConditionals(description)
 		description = EID:applyDescriptionModifier(description, SubType)
 	end
 	return description
@@ -482,7 +483,8 @@ end
 -- falls back to english if it doesnt exist, unless specified otherwise
 function EID:getDescriptionEntry(objTable, objID, noFallback)
 	if not objID then
-		return EID.descriptions[EID:getLanguage()][objTable] or EID.descriptions["en_us"][objTable]
+		if noFallback then return EID.descriptions[EID:getLanguage()][objTable]
+		else return EID.descriptions[EID:getLanguage()][objTable] or EID.descriptions["en_us"][objTable] end
 	else
 		local translatedTable = EID.descriptions[EID:getLanguage()][objTable]
 		if noFallback then return translatedTable and translatedTable[objID]
@@ -608,7 +610,7 @@ function EID:getObjectName(Type, Variant, SubType)
 	elseif tableName == "dice" then
 		return EID:getDescriptionEntry("diceHeader").." ("..SubType..")"
 	elseif tableName == "custom" then
-		local xmlName = EID.XMLEntityNames[Type.."."..Variant] or EID.XMLEntityNames[Type.."."..Variant.."."..SubType]
+		local xmlName = EID:GetEntityXMLName(Type, Variant, SubType)
 		return name or xmlName or Type.."."..Variant.."."..SubType
 	end
 	return Type.."."..Variant.."."..SubType
@@ -762,12 +764,15 @@ end
 function EID:createItemIconObject(str)
 	local collID,numReplace = string.gsub(str, "Collectible", "")
 	local item = nil
+	local subTypeIdentifier = 0
 	if numReplace > 0 and collID ~= "" and tonumber(collID) ~= nil then
 		item = EID.itemConfig:GetCollectible(tonumber(collID))
+		subTypeIdentifier = tonumber(collID)
 	end
 	local trinketID,numReplace2 = string.gsub(str, "Trinket", "")
 	if numReplace2 > 0 and trinketID ~= "" and tonumber(trinketID) ~= nil then
 		item = EID.itemConfig:GetTrinket(tonumber(trinketID))
+		subTypeIdentifier = tonumber(trinketID)
 	end
 	local cardID,numReplace3 = string.gsub(str, "Card", "")
 	if numReplace3 > 0 and cardID ~= "" and tonumber(cardID) ~= nil then
@@ -789,7 +794,7 @@ function EID:createItemIconObject(str)
 		spriteDummy:Load("gfx/eid_inline_icons.anm2", true)
 		spriteDummy:ReplaceSpritesheet(1, item.GfxFileName)
 		spriteDummy:LoadGraphics()
-		local newDynamicSprite = {"ItemIcon", 0, 11, 8, -2, -2, spriteDummy}
+		local newDynamicSprite = {"ItemIcon", subTypeIdentifier, 11, 8, -2, -2, spriteDummy}
 		dynamicSpriteCache[str] = newDynamicSprite
 		return newDynamicSprite
 	end
@@ -896,6 +901,9 @@ function EID:getColor(str, baseKColor)
 			else
 				if EID.InlineColors[strTrimmed] then colorFunc = nil end
 				color = EID.InlineColors[strTrimmed] or color
+				if EID.Config["ColorblindMode"] > 0 then
+					color = EID.ColorBlindColors[EID.Config["ColorblindMode"]][strTrimmed] or color
+				end
 			end
 			isColorMarkup = type(EID.InlineColors[strTrimmed]) ~= type(nil)
 		end
@@ -1153,54 +1161,19 @@ function EID:PlayersHaveTrinket(trinketID)
 	return false
 end
 
--- Checks if someone playing as certain character, for modifiers
-function EID:PlayersHaveCharacter(playerType)
+-- Checks if someone is playing as a certain character, for modifiers
+-- includeTainted means we don't care if the player is Tainted or not (for things that, say, apply to Lost/Tainted Lost)
+function EID:PlayersHaveCharacter(playerType, includeTainted)
 	for i = 0, game:GetNumPlayers() - 1 do
 		local player = Isaac.GetPlayer(i)
 		if player:GetPlayerType() == playerType then
 			return true, player
 		end
-	end
-	return false
-end
-
--- Obtains information about glitched items from the ItemConfig (hearts added on pickup, cacheflags affected), returns string of info
-local itemConfigItemAttributes = { "AddMaxHearts", "AddHearts", "AddSoulHearts", "AddBlackHearts", "AddBombs", "AddCoins", "AddKeys", "CacheFlags" }
-function EID:CheckGlitchedItemConfig(id)
-	local localizedNames = EID:getDescriptionEntry("GlitchedItemText")
-	local item = EID.itemConfig:GetCollectible(id)
-	if not item then return "" end
-	local attributes = "#"
-	for _,v in ipairs(itemConfigItemAttributes) do
-		local val = item[v]
-		if val ~= 0 then
-			if (v == "CacheFlags") then
-				local flagString = localizedNames["cacheFlagStart"]
-				if val == CacheFlag.CACHE_ALL then
-					flagString = flagString .. localizedNames[16]
-				else
-					for i=0, 13 do
-						if 2^i & val ~= 0 then
-							flagString = flagString .. localizedNames[i] .. ", "
-						end
-					end
-					flagString = string.sub(flagString, 0, -3) -- remove final comma
-				end
-				attributes = attributes .. flagString .. "#"
-			else
-				-- the Add Heart attributes count half a heart as 1, so divide the value in half
-				if string.find(v, "Hearts") then val = val / 2 end
-				-- the g flag removes .0 in numbers like 1.0 (caused by the hearts division)
-				local s = string.format("%.4g",val)
-				local prefix = "↑ "
-				if val > 0 then s = "+" .. s else prefix = "↓ " end
-				attributes = attributes .. prefix .. string.gsub(localizedNames[v], "{1}", s)
-				if val ~= 1 and val ~= -1 then attributes = attributes .. localizedNames["pluralize"] end
-				attributes = attributes .. "#"
-			end
+		if includeTainted and REPENTANCE and Isaac.GetPlayerTypeByName(player:GetName()) == playerType then
+			return true, player
 		end
 	end
-	return attributes
+	return false
 end
 
 -- Converts a given CollectibleID into the respective Spindown dice result
@@ -1699,7 +1672,10 @@ function EID:evaluateTransformationProgress(transformation)
 
 		if not EID.TransformationLookup[transformation] then return end
 
-		if transformData and transformData.VanillaForm and player:HasPlayerForm(transformData.VanillaForm) then
+		if REPENTOGON and transformData and transformData.VanillaForm then
+			 -- REPENTOGON lets us ignore everything else for vanilla transformation progress
+			EID.TransformationProgress[i][transformation] = player:GetPlayerFormCounter(transformData.VanillaForm)
+		elseif transformData and transformData.VanillaForm and player:HasPlayerForm(transformData.VanillaForm) then
 			EID.TransformationProgress[i][transformation] = transformData.NumNeeded or 3
 		else
 			local pickupHistory = EID.PlayerItemInteractions[i].pickupHistory
@@ -1954,4 +1930,38 @@ end
 -- returns true if the given pill color was used at least once in this game
 function EID:WasPillUsed(pillColor)
 	return EID.UsedPillColors[tostring(pillColor)] ~= nil
+end
+
+-- returns the name of the given entity
+function EID:GetEntityXMLName(Type, Variant, SubType)
+	return EID.XMLEntityNames[Type.."."..Variant] or EID.XMLEntityNames[Type.."."..Variant.."."..SubType]
+end
+
+-- Get an item's RNG seed. We have no use for the RNG object itself because every other function it can do will advance the item's RNG, altering the game state
+function EID:GetItemSeed(player, id, variant)
+	if player == nil then return game:GetSeeds():GetStartSeed()
+	elseif variant == nil or variant == 100 then return player:GetCollectibleRNG(id):GetSeed()
+	elseif variant == 350 then return player:GetTrinketRNG(id):GetSeed()
+	elseif variant == 300 then return player:GetCardRNG(id):GetSeed()
+	elseif variant == 70 then return player:GetPillRNG(id):GetSeed() end
+end
+
+local variantToName = { [70] = "Pill", [100] = "Collectible", [300] = "Card", [350] = "Trinket" }
+function EID:GetIconNameByVariant(variant)
+	return variantToName[variant]
+end
+
+function EID:GetIconStringByDescriptionObject(descObj)
+	if descObj and descObj.Icon then
+		if type(descObj.Icon) == "table" then 
+			local iconName = EID:GetIconNameByVariant(descObj.ObjVariant)
+			if iconName == "Card" or iconName == "Pill" then
+				return "{{" .. iconName .. (descObj.Icon[2] + 1) .. "}}"
+			end
+			return "{{" .. iconName .. descObj.Icon[2] .. "}}"
+		elseif type(descObj.Icon) == "string" then 
+			return descObj.Icon
+		end
+	end
+	return "{{Blank}}"
 end

@@ -526,45 +526,28 @@ local function GameStartCrafting()
 			CraftingItemAllowed[item.ID] = EID:isCollectibleAllowed(item.ID)
 		end
 	end
-	if not EID:PlayersHaveCollectible(CollectibleType.COLLECTIBLE_TMTRAINER) then
-		-- Check for modded items past the known max item ID on game start (can also support game updates)
-		-- Only works if the new items are at Weight 1.0 in their item pools, but better than nothing
-		if EID.Config["BagOfCraftingModdedRecipes"] and EID.itemConfig:GetCollectible(EID.XMLMaxItemID+1) ~= nil and not moddedCrafting then
-			-- Save last pool
-			local itemPool = game:GetItemPool()
-			local lastPool = itemPool:GetLastPool()
-			-- Items past max ID detected
-			CraftingMaxItemID = EID.XMLMaxItemID -- XMLMaxItemID is never modified
-			-- Add new item qualities
-			local coll = EID.itemConfig:GetCollectible(CraftingMaxItemID+1)
-			while coll ~= nil do
-				CraftingMaxItemID = CraftingMaxItemID + 1
-				CraftingItemQualities[coll.ID] = coll.CraftingQuality or coll.Quality
-				CraftingItemAllowed[coll.ID] = true
-				coll = EID.itemConfig:GetCollectible(CraftingMaxItemID+1)
-			end
-			-- Add new items to the crafting item pools, assuming Weight 1.0
-			for poolNum,_ in pairs(poolToIcon) do
-				for i=1,EID.XMLMaxItemID do itemPool:AddRoomBlacklist(i) end
-
-				local collID = itemPool:GetCollectible(poolNum, false, 1, 25)
-				local attempts = CraftingMaxItemID
-				while collID ~= 25 and collID ~= 642 and collID > 0 and attempts > 0 do
-					attempts = attempts - 1
-					table.insert(CraftingItemPools[poolNum+1], {collID, 1.0})
-					itemPool:AddRoomBlacklist(collID)
-					collID = itemPool:GetCollectible(poolNum, false, 1, 25)
-				end
-
-				-- Do getCollectible again to revert last pool
-				itemPool:GetCollectible(lastPool, false, 1, 25)
-
-				itemPool:ResetRoomBlacklist()
-			end
-			moddedCrafting = true
+	-- Use REPENTOGON to support modded items / updating the XML item pools
+	if REPENTOGON and not moddedCrafting then
+		-- Add modded items
+		CraftingMaxItemID = EID.XMLMaxItemID
+		local coll = EID.itemConfig:GetCollectible(CraftingMaxItemID+1)
+		while coll ~= nil do
+			CraftingMaxItemID = CraftingMaxItemID + 1
+			CraftingItemQualities[coll.ID] = coll.CraftingQuality or coll.Quality
+			CraftingItemAllowed[coll.ID] = true
+			coll = EID.itemConfig:GetCollectible(CraftingMaxItemID+1)
 		end
-
+		-- Redo the entire item pool table, not just add modded items, in case of mods messing the vanilla ones up
+		local itemPool = game:GetItemPool()
+		for poolNum,_ in pairs(poolToIcon) do
+			CraftingItemPools[poolNum+1] = {}
+			local thePool = itemPool:GetCollectiblesFromPool(poolNum)
+			for _,collTable in pairs(thePool) do
+				table.insert(CraftingItemPools[poolNum+1], {collTable.itemID, collTable.weight})
+			end
+		end
 		sortNeeded = true
+		moddedCrafting = true
 	end
 end
 EID:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, GameStartCrafting)
@@ -586,7 +569,7 @@ EID:AddCallback(ModCallbacks.MC_PRE_PICKUP_COLLISION, function(_, pickup,collide
 end)
 
 -- Formerly a MC_POST_PICKUP_UPDATE, but moved to this so that it's only called when we own a bag
-local function checkForPickups()
+function EID:BoCCheckForPickups()
 	for _,pickup in ipairs(Isaac.FindByType(EntityType.ENTITY_PICKUP, -1, -1, false, false)) do
 		if pickup:GetSprite():GetAnimation() == "Collect" and not pickupsCollected[pickup.Index] then
 			pickupsCollected[pickup.Index] = true
@@ -605,10 +588,12 @@ local function checkForPickups()
 	end
 end
 
-EID:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function(_)
+function EID:BoCOnNewRoom(_)
 	-- We're using the pickup indexes for quick checking, which reset on each new room
 	pickupsCollected = {}
-end)
+	recheckPickups = true
+end
+EID:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, EID.BoCOnNewRoom)
 
 -- Using a Card/Pill will change our inventory craftable items, so force a refresh then
 -- (Note: Items that directly add a card/pill to you, i.e. Bottle of Pills, also need a refresh, but aren't tracked for performance)
@@ -622,7 +607,7 @@ end)
 --Tainted Cain "hold to craft" check
 local holdCounter = 0
 local icount = 0
-local function trackBagHolding()
+function EID:BoCTrackBagHolding()
 	if not IsTaintedCain() then return end
 	local isCardHold = Input.IsActionPressed(ButtonAction.ACTION_PILLCARD, EID.bagPlayer.ControllerIndex)
 	local animationName = EID.bagPlayer:GetSprite():GetAnimation()
@@ -655,7 +640,7 @@ local function shiftBagContent()
 	EID.BoC.BagItems = newContent
 end
 -- only Tainted Cain's consumable slot bag can have its ingredients shifted
-local function detectBagContentShift()
+function EID:BoCDetectBagContentShift()
 	if Input.IsActionTriggered(ButtonAction.ACTION_DROP, EID.bagPlayer.ControllerIndex) and IsTaintedCain() then
 		shiftBagContent()
 	end
@@ -765,7 +750,7 @@ local function getFloorItemsString(showPreviews, roomItems)
 	local bagItems = EID.BoC.BagItemsOverride or EID.BoC.BagItems
 	if #bagItems >0 then
 		if showPreviews and #bagItems == 8 then
-			local recipe = EID:calculateBagOfCrafting(bagItems)
+			local recipe = REPENTOGON and EID.bagPlayer:GetBagOfCraftingOutput() or EID:calculateBagOfCrafting(bagItems)
 			floorString = floorString .. "{{Collectible"..recipe.."}} "
 		end
 		local bagDesc = EID:getDescriptionEntry("CraftingBagContent")
@@ -930,9 +915,9 @@ function EID:handleBagOfCraftingUpdating()
 	lastSeedUsed = curSeed
 
 	-- watch for holding the Craft button, and pressing the ingredient shift button
-	trackBagHolding()
-	detectBagContentShift()
-	if EID.GameRenderCount % 2 == 0 then checkForPickups() end
+	EID:BoCTrackBagHolding()
+	EID:BoCDetectBagContentShift()
+	if EID.GameRenderCount % 2 == 0 then EID:BoCCheckForPickups() end
 
 	-- Check for Hide/Preview hotkeys; prevent them from triggering while in MCM
 	if not ModConfigMenu or not ModConfigMenu.IsVisible then
@@ -990,6 +975,34 @@ function EID:handleBagOfCraftingUpdating()
 	if (bagOfCraftingOffset >= numResults) then bagOfCraftingOffset = bagOfCraftingOffset - EID.Config["BagOfCraftingResults"] end
 end
 
+-- Check what pickups are available in this room
+function EID:BoCGetRoomPickupList()
+	local currentRoomDesc = game:GetLevel():GetCurrentRoomDesc()
+	local curRoomIndex = currentRoomDesc.ListIndex
+	local pickups = Isaac.FindByType(5, -1, -1, true, false)
+
+	if EID.BoC.CurrentPickupCount ~= #pickups or recheckPickups then
+		local roomItems = {}
+		recheckPickups = false
+		for _, entity in ipairs(pickups) do
+			local craftingIDs = EID:getBagOfCraftingID(entity.Variant, entity.SubType)
+			if craftingIDs ~= nil and not entity:ToPickup():IsShopItem() and entity:GetSprite():GetAnimation() ~= "Collect" then
+				for _,v in ipairs(craftingIDs) do
+					table.insert(roomItems, v)
+				end
+			end
+		end
+		EID.BoC.RoomQueries[curRoomIndex .. ""] = { roomItems, currentRoomDesc.Data.Variant }
+		EID.BoC.CurrentPickupCount = #pickups
+		calcHeldItems()
+		calcFloorItems()
+		EID.RefreshBagTextbox = true
+		return roomItems
+	else
+		return EID.BoC.RoomQueries[curRoomIndex .. ""] and EID.BoC.RoomQueries[curRoomIndex .. ""][1] or {}
+	end
+end
+
 -- Called when needed based on EID.Config["RefreshRate"]
 function EID:handleBagOfCraftingRendering(ignoreRefreshRate)
 	-- Determine if we should display anything at all
@@ -1009,6 +1022,12 @@ function EID:handleBagOfCraftingRendering(ignoreRefreshRate)
 		return false
 	end
 
+	if REPENTOGON then
+		EID.BoC.BagItems = EID.bagPlayer:GetBagOfCraftingContent()
+		for i=1,8 do
+			if EID.BoC.BagItems[i] == 0 then EID.BoC.BagItems[i] = nil end
+		end
+	end
 	local bagItems = EID.BoC.BagItemsOverride or EID.BoC.BagItems
 	-- Display the result of the 8 items in our bag if applicable
 	if (EID.ShowCraftingResult or EID.Config["BagOfCraftingDisplayRecipesMode"] == "Preview Only") and #bagItems == 8 then
@@ -1016,7 +1035,7 @@ function EID:handleBagOfCraftingRendering(ignoreRefreshRate)
 			EID.ShowCraftingResult = false
 			return false
 		end
-		local craftingResult = EID:calculateBagOfCrafting(bagItems)
+		local craftingResult = REPENTOGON and EID.bagPlayer:GetBagOfCraftingOutput() or EID:calculateBagOfCrafting(bagItems)
 		local descriptionObj = EID:getDescriptionObj(5, 100, craftingResult)
 		-- prepend the Hide/Preview hotkeys to the description
 		descriptionObj.Description = getHotkeyString() .. descriptionObj.Description
@@ -1027,28 +1046,7 @@ function EID:handleBagOfCraftingRendering(ignoreRefreshRate)
 	if (EID.Config["BagOfCraftingDisplayRecipesMode"] == "Preview Only") then return false end
 
 	-- Check what pickups are available in this room
-	local curRoomIndex = game:GetLevel():GetCurrentRoomDesc().ListIndex
-	local roomItems = {}
-	local pickups = Isaac.FindByType(5, -1, -1, true, false)
-
-	if EID.BoC.CurrentPickupCount ~= #pickups or recheckPickups then
-		recheckPickups = false
-		for _, entity in ipairs(pickups) do
-			local craftingIDs = EID:getBagOfCraftingID(entity.Variant, entity.SubType)
-			if craftingIDs ~= nil and not entity:ToPickup():IsShopItem() and entity:GetSprite():GetAnimation() ~= "Collect" then
-				for _,v in ipairs(craftingIDs) do
-					table.insert(roomItems, v)
-				end
-			end
-		end
-		EID.BoC.RoomQueries[curRoomIndex .. ""] = { roomItems, game:GetLevel():GetCurrentRoomDesc().Data.Variant }
-		EID.BoC.CurrentPickupCount = #pickups
-		calcHeldItems()
-		calcFloorItems()
-		EID.RefreshBagTextbox = true
-	else
-		roomItems = EID.BoC.RoomQueries[curRoomIndex .. ""] and EID.BoC.RoomQueries[curRoomIndex .. ""][1] or {}
-	end
+	local roomItems = EID:BoCGetRoomPickupList()
 
 	itemQuery = {}
 	local itemCount = {}

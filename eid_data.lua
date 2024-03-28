@@ -635,6 +635,26 @@ EID.InlineIcons["DevilChance"] = EID.isRepentance and EID.InlineIcons["DevilChan
 EID.InlineIcons["Tearsize"] = EID.isRepentance and EID.InlineIcons["TearsizeREP"] or EID.InlineIcons["TearsizeAB"]
 
 
+-- Function for handling colors that fade between multiple different colors (rainbow, gold, tarot cloth purple)
+local function SwagColors(colors, maxAnimTime)
+	maxAnimTime = maxAnimTime or 80
+	local animTime = Game():GetFrameCount() % maxAnimTime
+	local colorFractions = (maxAnimTime - 1) / #colors
+	local subAnm = math.floor(animTime / (colorFractions + 1)) + 1
+	local primaryColorIndex = subAnm % (#colors + 1)
+	if primaryColorIndex == 0 then
+		primaryColorIndex = 1
+	end
+	local secondaryColorIndex = (subAnm + 1) % (#colors + 1)
+	if secondaryColorIndex == 0 then
+		secondaryColorIndex = 1
+	end
+	return EID:interpolateColors(
+		colors[primaryColorIndex],
+		colors[secondaryColorIndex],
+		(animTime % (colorFractions + 1)) / colorFractions
+	)
+end
 
 -- Table that holds Colors used for markup objects. Example: "{{ColorRed}}"
 -- Format: ["Shortcut"] = KColor
@@ -671,53 +691,33 @@ EID.InlineColors = {
 	["ColorPastelBlue"] = KColor(0.3882, 0.5216, 1, 1),
 	["ColorLavender"] = KColor(0.7451, 0.3686, 1, 1),
 	["ColorLightOrange"] = KColor(1, 0.6353, 0.3686, 1),
+	["ColorLightYellow"] = KColor(1, 1, 0.5, 1),
 	["ColorBagComplete"] = KColor(0, 1, 0, 0.6),
 	["ColorBagOverfill"] = KColor(1, 0.5, 0.1, 0.6),
-	-- Swag Colors
 
+	-- Swag Colors
 	-- Rainbow color effect
 	["ColorRainbow"] = function(_)
-		local maxAnimTime = 80
-		local animTime = Game():GetFrameCount() % maxAnimTime
 		local c = EID.InlineColors
-		local colors = {c["ColorRed"], c["ColorYellow"], c["ColorLime"], c["ColorCyan"], c["ColorBlue"], c["ColorPink"]}
-		local colorFractions = (maxAnimTime - 1) / #colors
-		local subAnm = math.floor(animTime / (colorFractions + 1)) + 1
-		local primaryColorIndex = subAnm % (#colors + 1)
-		if primaryColorIndex == 0 then
-			primaryColorIndex = 1
-		end
-		local secondaryColorIndex = (subAnm + 1) % (#colors + 1)
-		if secondaryColorIndex == 0 then
-			secondaryColorIndex = 1
-		end
-		return EID:interpolateColors(
-			colors[primaryColorIndex],
-			colors[secondaryColorIndex],
-			(animTime % (colorFractions + 1)) / colorFractions
-		)
+		return SwagColors({c["ColorRed"], c["ColorYellow"], c["ColorLime"], c["ColorCyan"], c["ColorBlue"], c["ColorPink"]})
 	end,
 	-- Gold rainbow color effect
 	["ColorGold"] = function(_)
-		local maxAnimTime = 80
-		local animTime = Game():GetFrameCount() % maxAnimTime
 		local c = EID.InlineColors
-		local colors = {c["ColorYellow"], c["ColorOrange"]}
-		local colorFractions = (maxAnimTime - 1) / #colors
-		local subAnm = math.floor(animTime / (colorFractions + 1)) + 1
-		local primaryColorIndex = subAnm % (#colors + 1)
-		if primaryColorIndex == 0 then
-			primaryColorIndex = 1
-		end
-		local secondaryColorIndex = (subAnm + 1) % (#colors + 1)
-		if secondaryColorIndex == 0 then
-			secondaryColorIndex = 1
-		end
-		return EID:interpolateColors(
-			colors[primaryColorIndex],
-			colors[secondaryColorIndex],
-			(animTime % (colorFractions + 1)) / colorFractions
-		)
+		return SwagColors({c["ColorYellow"], c["ColorOrange"]})
+	end,
+	-- Yellow to green/red for positive/negative car battery effects
+	["BlinkYellowGreen"] = function(_)
+		local c = EID.InlineColors
+		return SwagColors({c["ColorYellow"], c["ColorLime"]})
+	end,
+	["BlinkYellowRed"] = function(_)
+		local c = EID.InlineColors
+		return SwagColors({c["ColorYellow"], c["ColorRed"]})
+	end,
+	-- Shiny purple color effect
+	["ColorShinyPurple"] = function(_)
+		return SwagColors({KColor(0.812, 0.627, 1, 1), KColor(0.62, 0.251, 1, 1)}, 40)
 	end,
 	-- Text will blink frequently
 	["ColorBlink"] = function(color)
@@ -746,7 +746,20 @@ EID.InlineColors = {
 		return color
 	end,
 }
-
+EID.ColorBlindColors = {
+	{ -- Protanopia
+		["ColorBagComplete"] = KColor(0.2, 0.2, 1, 0.6), -- blue-ish
+		["ColorBagOverfill"] = KColor(1, 0, 0, 0.6), -- red
+	},
+	{ -- Deuteranopia
+		["ColorBagComplete"] = KColor(0.2, 0.2, 1, 0.6), -- blue-ish
+		["ColorBagOverfill"] = KColor(1, 0, 0, 0.6), -- red
+	},
+	{ -- Tritanopia
+		--["ColorBagComplete"] = KColor(0, 1, 0, 0.6),  -- no changes needed
+		--["ColorBagOverfill"] = KColor(1, 0.5, 0.1, 0.6),  -- no changes needed
+	}
+}
 -- Data table for a trinket's ability to be doubled/tripled by Mom's Box or being Golden
 -- Due to only a few exceptions needing special rules, most of these are just a single number, which will be found in the description and multiplied
 -- Exceptions will use a table to figure out what to do with them:
@@ -768,7 +781,7 @@ EID.GoldenTrinketData = {
 	-- NO!, Brown Cap, Cracked Crown, Ouroboros Worm, Broken Syringe, Teardrop Charm, Beth's Faith (possibly tripleable, but max 8 wisps in its ring)
 	[88] = {append = true}, [90] = {t={100}, mult=2}, [92] = 20, [96] = {t={0.4, 1.5}}, [132] = {t={25}, mult=4}, [139] = {t={4},mults={1.5,2}}, [142] = {t={4}, mult=2},
 	-- Old Capacitor (hard cap of 33% chance), Perfection, Mom's Lock, Dice Bag, Mother's Kiss
-	[143] = {t={20}, mult=1.65}, [145] = 10, [153] = {t={25}, mult=4}, [154] = {t={50}, mult=2}, [156] = 1,
+	[143] = {t={20}, mult=1.65}, [145] = 10, [153] = {t={25}, mult=4}, [154] = {t={50}, mult=2}, [156] = {t={1,1}},
 	-- Gilded Key (Golden = no +1 key; probably a bug), Lucky Sack, Azazel's Stump (50/67/100), Dingle Berry, Ring Cap
 	[159] = {goldenOnly = true, fullReplace = true, mult=1}, [160] = 1, [162] = {t={50}, mults={1.32, 2}}, [163] = {t={1},mult=2}, [164] = 1,
 	-- Modeling Clay, Polished Bone (25, 33, 50), Hollow Heart, Kid's Drawing, Crystal Key
@@ -881,3 +894,17 @@ EID.TransformationData = {
 EID.RoomShapeToMarkup = { "{{Room}}", "{{RoomSmallHorizontal}}", "{{RoomSmallVertical}}", "{{RoomLongVertical}}", "{{RoomLongThinVertical}}","{{RoomLongHorizontal}}", "{{RoomLongThinHorizontal}}", "{{RoomXL}}", "{{RoomLTopLeft}}", "{{RoomL}}", "{{RoomLBottomLeft}}", "{{RoomLBottomRight}}" }
 EID.RoomTypeToMarkup = { "{{Room}}", "{{Shop}}", "{{ErrorRoom}}", "{{TreasureRoom}}", "{{BossRoom}}", "{{MiniBoss}}", "{{SecretRoom}}", "{{SuperSecretRoom}}", "{{ArcadeRoom}}", "{{CursedRoom}}", "{{ChallengeRoom}}", "{{Library}}", "{{SacrificeRoom}}", "{{DevilRoom}}", "{{AngelRoom}}", "{{LadderRoom}}", "{{Room}}" --[[boss rush]], "{{IsaacsRoom}}", "{{BarrenRoom}}", "{{ChestRoom}}", "{{DiceRoom}}", "{{Shop}}", "{{Room}}", --[[Black Market / Greed Exit]] "{{Planetarium}}", "{{Teleporter}}","{{Teleporter}}", "{{Room}}", "{{Room}}" --[[Blue Key rooms]], "{{UltraSecretRoom}}" }
 EID.ItemPoolTypeToMarkup = { [0] = "{{ItemPoolTreasure}}", "{{ItemPoolShop}}", "{{ItemPoolBoss}}", "{{ItemPoolDevil}}", "{{ItemPoolAngel}}", "{{ItemPoolSecret}}", "{{ItemPoolLibrary}}", "{{ItemPoolShellGame}}", "{{ItemPoolGoldenChest}}", "{{ItemPoolRedChest}}", "{{ItemPoolBeggar}}", "{{ItemPoolDemonBeggar}}", "{{ItemPoolCurse}}", "{{ItemPoolKeyMaster}}", "{{ItemPoolBombBum}}", "{{ItemPoolMomsChest}}", "{{ItemPoolGreedTreasure}}", "{{ItemPoolGreedShop}}", "{{ItemPoolGreedBoss}}", "{{ItemPoolGreedDevil}}", "{{ItemPoolGreedAngel}}", "{{ItemPoolGreedCurse}}", "{{ItemPoolGreedSecret}}", "{{ItemPoolCraneGame}}", "{{ItemPoolUltraSecret}}", "{{ItemPoolBatteryBum}}", "{{ItemPoolPlanetarium}}", "{{ItemPoolOldChest}}", "{{ItemPoolBabyShop}}", "{{ItemPoolWoodenChest}}", "{{ItemPoolRottenBeggar}}"}
+
+-- additional offset of the textbox to the entity position. Only applies in local description mode.
+-- If a function returns a value, it will be used as the offset
+EID.LocalModePositionOffset = {
+	Default = Vector(0, 20),
+	Shop = function(entity) if entity and not EID:IsGridEntity(entity) and entity:ToPickup() and entity:ToPickup():IsShopItem() then return Vector(0, 35) end end,
+} 
+
+-- Character IDs that aren't allowed to have Red Health: ???, The Lost, The Soul
+EID.NoRedHeartsPlayerIDs = { [4] = true, [10] = true, [17] = true }
+if REPENTANCE then
+	-- ???, The Lost, Black Judas, The Soul, Tainted Judas, Tainted ???, Tainted Lost, Tainted Forgotten, Tainted Bethany, Tainted Soul
+	EID.NoRedHeartsPlayerIDs = { [4] = true, [10] = true, [12] = true, [17] = true, [24] = true, [25] = true, [31] = true, [35] = true, [36] = true, [40] = true }
+end

@@ -10,8 +10,8 @@ EID.isRepentance = REPENTANCE -- REPENTANCE variable can be altered by any mod, 
 require("eid_config")
 EID.Config = EID.UserConfig
 EID.Config.Version = "3.2" -- note: changing this will reset everyone's settings to default!
-EID.ModVersion = 4.62
-EID.ModVersionCommit = "b3b7f46"
+EID.ModVersion = 4.70
+EID.ModVersionCommit = "01788b0"
 EID.DefaultConfig.Version = EID.Config.Version
 EID.isHidden = false
 EID.player = nil -- The primary Player Entity of Player 1
@@ -20,6 +20,7 @@ EID.coopMainPlayers = {} -- The primary Player Entity for each controller being 
 EID.coopAllPlayers = {} -- Every Player Entity (includes Esau, T.Forgotten)
 EID.controllerIndexes = {} -- A table to map each controller index to their player number for coloring indicators
 EID.isMultiplayer = false -- Used to color P1's highlight/outline indicators (single player just uses white)
+EID.isOnlineMultiplayer = false -- Set to true to disable code functions that might cause desyncs
 EID.BoC = {}
 
 -- general variables
@@ -111,6 +112,7 @@ require("eid_mcm")
 require("eid_data")
 require("eid_xmldata")
 require("eid_api")
+require("eid_conditionals")
 require("eid_modifiers")
 require("eid_holdmapdesc")
 require("eid_itemprediction")
@@ -126,6 +128,7 @@ if EID.isRepentance then
 	end
 	local wasSuccessful, _ = pcall(require,"descriptions."..EID.GameVersion..".transformations")
 	require("eid_bagofcrafting")
+	require("eid_tmtrainer")
 end
 
 EID.LastRenderCallColor = EID:getTextColor()
@@ -137,7 +140,6 @@ local modfolder ='external item descriptions_836319872' --release mod folder nam
 
 function EID:GetCurrentModPath()
 	if debug then
-		if EID.isRepentance then require("eid_tmtrainer") end
 		return string.sub(debug.getinfo(EID.GetCurrentModPath).source,2) .. "/../"
 	end
 	--use some very hacky trickery to get the path to this mod
@@ -697,7 +699,6 @@ function EID:printDescription(desc, cachedID)
 		local itemConfig = EID.itemConfig:GetCollectible(desc.ObjSubType)
 		if itemConfig:IsCollectible() and not itemConfig:HasTags(ItemConfig.TAG_QUEST) then
 			local lastPool = game:GetItemPool():GetLastPool()
-			local itemPoolLineHeight = EID.lineHeight
 
 			local poolName = ""
 			local poolDescPrepend = EID:getDescriptionEntry("itemPoolFor")
@@ -778,6 +779,13 @@ function EID:onNewRoom()
 	EID:CheckCurrentRoomGridEntities()
 end
 EID:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, EID.onNewRoom)
+
+function EID:onCmd(command, _)
+	if command == "netstart" then -- the game somehow propagates that command correctly to the callback...
+		EID.isOnlineMultiplayer = true
+	end
+end 
+EID:AddCallback(ModCallbacks.MC_EXECUTE_CMD, EID.onCmd)
 ---------------------------------------------------------------------------
 ---------------------------Handle Rendering--------------------------------
 
@@ -830,8 +838,8 @@ function EID:renderUnidentifiedPill(entity)
 	end
 end
 
--- RGB colors for each player's highlights (Red, Blue, Green, Yellow)
-local playerRGB = { {1,0.6,0.6}, {0.5,0.75,1}, {0.5,1,0.75}, {0.9, 0.9, 0.5} }
+-- RGB colors for each player's highlights (Red, Blue, Yellow, Green)
+local playerRGB = { {1,0.6,0.6}, {0.5,0.75,1}, {0.9, 0.9, 0.5}, {0.5,1,0.75} }
 
 ---@param entity Entity
 function EID:renderIndicator(entity, playerNum)
@@ -911,7 +919,17 @@ function EID:PositionLocalMode(entity)
 		EID.Scale = EID.Config["LocalModeSize"]
 		EID.CurrentScaleType = "LocalModeSize"
 		local textBoxWidth = EID.Config["LocalModeCentered"] and tonumber(EID.Config["TextboxWidth"])/2 * EID.Scale or -30
-		local textPosOffset = Vector(-textBoxWidth, 20)
+		local textPosOffset = Vector(-textBoxWidth, 0)
+
+		local additiveOffset = EID.LocalModePositionOffset.Default
+		for _, offsetFunc in pairs(EID.LocalModePositionOffset) do
+			if type(offsetFunc) == "function" then
+				additiveOffset = offsetFunc(entity) or additiveOffset
+				break
+			end
+		end
+		textPosOffset = textPosOffset + additiveOffset
+
 		EID:alterTextPos(Isaac.WorldToScreen(entity.Position + textPosOffset))
 		if EID.isMirrorRoom then
 			EID:alterTextPos(Isaac.WorldToScreen(entity.Position + textPosOffset * Vector(-1,0)))
@@ -1088,7 +1106,7 @@ local pathCheckerEntity = nil
 local lastPathfindFrame = -1
 
 local function attemptPathfind(entity)
-	if (EID.Config["DisableObstructionOnFlight"] and EID.player.CanFly) then
+	if (EID.Config["DisableObstructionOnFlight"] and EID.player.CanFly) or EID.isOnlineMultiplayer then
 		pathsChecked[entity.InitSeed] = true
 		return true
 	end
@@ -1119,7 +1137,7 @@ function EID:CheckStartOfRunWarnings()
 			EID:displayPermanentText(demoDescObj, "AchievementWarningTitle")
 			hasShownStartWarning = true
 		-- Bag of Crafting modded items check
-		elseif EID:PlayersHaveCollectible(710) and EID:DetectModdedItems() and EID.Config.DisplayBagOfCrafting ~= "never" and
+		elseif not REPENTOGON and EID:PlayersHaveCollectible(710) and EID:DetectModdedItems() and EID.Config.DisplayBagOfCrafting ~= "never" and
 		(EID.Config.BagOfCraftingDisplayRecipesMode == "Recipe List" or EID.Config.BagOfCraftingDisplayRecipesMode == "Preview Only") then
 			local demoDescObj = EID:getDescriptionObj(-999, -1, 1)
 			demoDescObj.Name = EID:getDescriptionEntry("AchievementWarningTitle") or ""
@@ -1298,6 +1316,8 @@ function EID:OnRender()
 		end
 	end
 
+	EID:ItemReminderHandleInputs()
+
 	if EID.ForceRefreshCache then
 		EID:ResetDescCache()
 	end
@@ -1421,14 +1441,15 @@ function EID:OnRender()
 						end
 
 						local glitchedObj = EID:getDescriptionObj(closest.Type, closest.Variant, closest.SubType, closest)
+						local glitchedName = EID.itemConfig:GetCollectible(closest.SubType).Name
 						local glitchedDesc = EID:getXMLDescription(closest.Type, closest.Variant, closest.SubType)
 
 						-- force the default glitchy description if option is off
 						if not EID.Config["DisplayGlitchedItemInfo"] then
 							glitchedObj.Description = glitchedDesc
-						-- grab the Item Config info if eid_tmtrainer.lua hasn't taken care of it, and it hasn't been done before
-						elseif not debug and glitchedObj.Description == glitchedDesc then
-							EID:addCollectible(closest.SubType, EID:CheckGlitchedItemConfig(closest.SubType) .. glitchedDesc)
+						-- grab the Item Config info if we haven't created a desc for it before, or its name has changed since we did (different game session)
+						elseif glitchedObj.Description == glitchedDesc or glitchedObj.Name ~= glitchedName then
+							EID:addCollectible(closest.SubType, EID:CheckGlitchedItemConfig(closest.SubType), glitchedName)
 							glitchedObj = EID:getDescriptionObj(closest.Type, closest.Variant, closest.SubType, closest)
 						end
 
@@ -1555,11 +1576,12 @@ function EID:OnRender()
 
 	-- handle showing the Hold Map Helper description
 	if EID.Config["ItemReminderEnabled"] and EID.holdTabCounter >= 30 and EID.TabDescThisFrame == false and EID.holdTabPlayer ~= nil then
+		EID:ItemReminderHandleInputs()
 		local demoDescObj = EID:getDescriptionObj(-999, -1, 1)
-		demoDescObj.Name = EID:getDescriptionEntry("HoldMapTitle")
-		demoDescObj.PermanentTextEnglish = EID:getDescriptionEntryEnglish("HoldMapTitle")
+		demoDescObj.PermanentTextEnglish = EID:getDescriptionEntryEnglish("ItemReminder", "Title")
 		-- check for scrolling being enabled here and append scroll controls to the title?
-		demoDescObj.Description = EID:getHoldMapDescription(EID.holdTabPlayer)
+		demoDescObj.Description = EID:ItemReminderGetDescription(EID.holdTabPlayer)
+		demoDescObj.Name = EID:ItemReminderGetTitle()
 		if (demoDescObj.Description ~= "") then EID:addDescriptionToPrint(demoDescObj, 1) end
 	end
 
@@ -1794,5 +1816,12 @@ EID:AddCallback(ModCallbacks.MC_PRE_GAME_EXIT, EID.OnGameExit)
 if EID.enableDebug then
 	require("eid_debugging")
 end
+
+-- load repentogon stuff last to allow overrides of functions
+require("eid_repentogon")
+
+Isaac.DebugString("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+Isaac.DebugString("External Item Descriptions v"..EID.ModVersion.."_"..EID.ModVersionCommit.." loaded.")
+Isaac.DebugString("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
 print("External Item Descriptions v"..EID.ModVersion.."_"..EID.ModVersionCommit.." loaded.")
